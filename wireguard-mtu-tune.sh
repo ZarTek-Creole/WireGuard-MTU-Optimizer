@@ -130,10 +130,11 @@ cleanup() {
 
 # Création des répertoires nécessaires
 echo "[DEBUG] Création des répertoires..."
-sudo mkdir -p "$BACKUP_DIR"
-sudo mkdir -p "$LOGS_DIR"
-sudo touch "$TEMP_DIR/sysctl_verify"
-sudo touch "$BACKUP_DIR/interface_config"
+sudo install -d -m 755 "$TEMP_DIR"
+sudo install -d -m 755 "$BACKUP_DIR"
+sudo install -d -m 755 "$LOGS_DIR"
+sudo install -m 644 /dev/null "$TEMP_DIR/sysctl_verify"
+sudo install -m 644 /dev/null "$BACKUP_DIR/interface_config"
 echo "[DEBUG] Répertoires créés"
 
 # Fonction principale
