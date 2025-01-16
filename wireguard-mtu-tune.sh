@@ -145,6 +145,9 @@ main() {
         exit 1
     fi
     
+    # Validation des valeurs MTU
+    validate_mtu_values
+    
     # Configuration des paramètres système
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [LOG_INFO] Configuration des paramètres système pour WireGuard..."
     configure_system_parameters
@@ -269,6 +272,8 @@ generate_report() {
         echo "=== Résultats détaillés ==="
         if [ -f "$results_file" ]; then
             sudo cat "$results_file"
+            echo ""
+            generate_ascii_graph "$results_file"
         else
             echo "MTU,Latence (ms),Perte (%)"
             echo "Aucun résultat détaillé disponible"
@@ -318,6 +323,80 @@ configure_system_parameters() {
     sysctl -w net.ipv4.tcp_fack=1
     
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [LOG_INFO] Paramètres système configurés avec succès"
+}
+
+# Fonction de validation des valeurs MTU
+validate_mtu_values() {
+    if [[ $MIN_MTU -lt 1280 || $MAX_MTU -gt 9000 ]]; then
+        log_error "Les valeurs MTU doivent être entre 1280 et 9000"
+        cleanup 1
+    fi
+    
+    if [[ $MIN_MTU -ge $MAX_MTU ]]; then
+        log_error "MIN_MTU doit être inférieur à MAX_MTU"
+        cleanup 1
+    fi
+}
+
+# Fonction de génération de graphique ASCII
+generate_ascii_graph() {
+    local results_file="$1"
+    local width=60
+    local height=15
+    
+    # Lecture des données
+    local -a mtus=()
+    local -a latencies=()
+    while IFS=, read -r mtu latency loss; do
+        if [[ "$mtu" != "MTU" ]]; then
+            mtus+=("$mtu")
+            latencies+=("$latency")
+        fi
+    done < "$results_file"
+    
+    # Calcul des valeurs min/max pour l'échelle
+    local min_latency=$(printf "%s\n" "${latencies[@]}" | sort -n | head -n1)
+    local max_latency=$(printf "%s\n" "${latencies[@]}" | sort -n | tail -n1)
+    
+    echo ""
+    echo "=== Graphique des latences ==="
+    echo "Latence (ms)"
+    
+    # Génération du graphique
+    for ((i=height-1; i>=0; i--)); do
+        local row=""
+        local current_latency=$(echo "scale=3; $min_latency + ($max_latency - $min_latency) * $i / ($height-1)" | bc)
+        printf "%6.2f │" "$current_latency"
+        
+        for latency in "${latencies[@]}"; do
+            if (( $(echo "$latency >= $current_latency" | bc -l) )); then
+                row+="█"
+            else
+                row+=" "
+            fi
+        done
+        echo "$row"
+    done
+    
+    # Axe X
+    printf "      └"
+    for ((i=0; i<${#mtus[@]}; i++)); do
+        printf "─"
+    done
+    echo " MTU"
+    
+    # Valeurs MTU
+    printf "       "
+    for mtu in "${mtus[@]}"; do
+        printf "│"
+    done
+    echo ""
+    
+    printf "       "
+    for mtu in "${mtus[@]}"; do
+        printf "%d " "$mtu"
+    done
+    echo ""
 }
 
 # Appel de la fonction principale avec les arguments
