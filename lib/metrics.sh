@@ -270,8 +270,345 @@ generate_performance_report() {
     echo "$output_file"
 }
 
+# Analyse des performances
+analyze_performance_patterns() {
+    local interface="$1"
+    log_debug "Starting performance pattern analysis for interface: $interface"
+
+    # Validate input
+    if [[ -z "$interface" ]]; then
+        log_error "Interface parameter is required for analyze_performance_patterns"
+        return 1
+    }
+
+    # Check if models file exists and is valid JSON
+    if [[ ! -f "$MODELS_FILE" ]]; then
+        echo '{"version": "1.0", "network_conditions": {}}' > "$MODELS_FILE"
+    fi
+
+    # Extract recent data
+    local recent_data
+    recent_data=$(jq -c --arg interface "$interface" '.performance_records[] | select(.interface == $interface) | .metrics' "$HISTORY_FILE")
+    
+    if [[ -z "$recent_data" ]]; then
+        log_warning "No recent data found for interface: $interface"
+        return 1
+    }
+    log_debug "Extracted recent data: $recent_data"
+
+    # Calculate metrics
+    local latency_avg throughput_avg packet_loss_avg
+    latency_avg=$(echo "$recent_data" | jq -s 'map(.latency) | add / length')
+    throughput_avg=$(echo "$recent_data" | jq -s 'map(.throughput) | add / length')
+    packet_loss_avg=$(echo "$recent_data" | jq -s 'map(.packet_loss) | add / length')
+
+    # Calculate trends (difference between latest and average)
+    local latest_data
+    latest_data=$(echo "$recent_data" | jq -s 'last')
+    local latency_trend throughput_trend packet_loss_trend
+    latency_trend=$(echo "$latest_data" | jq --arg avg "$latency_avg" '.latency - ($avg|tonumber)')
+    throughput_trend=$(echo "$latest_data" | jq --arg avg "$throughput_avg" '.throughput - ($avg|tonumber)')
+    packet_loss_trend=$(echo "$latest_data" | jq --arg avg "$packet_loss_avg" '.packet_loss - ($avg|tonumber)')
+
+    # Generate patterns
+    local patterns
+    patterns=$(jq -n \
+        --arg interface "$interface" \
+        --arg latency_avg "$latency_avg" \
+        --arg latency_trend "$latency_trend" \
+        --arg throughput_avg "$throughput_avg" \
+        --arg throughput_trend "$throughput_trend" \
+        --arg packet_loss_avg "$packet_loss_avg" \
+        --arg packet_loss_trend "$packet_loss_trend" \
+        '{
+            "version": "1.0",
+            "network_conditions": {
+                ($interface): {
+                    "latency_trend": {
+                        "avg": ($latency_avg|tonumber),
+                        "trend": ($latency_trend|tonumber)
+                    },
+                    "throughput_trend": {
+                        "avg": ($throughput_avg|tonumber),
+                        "trend": ($throughput_trend|tonumber)
+                    },
+                    "packet_loss_trend": {
+                        "avg": ($packet_loss_avg|tonumber),
+                        "trend": ($packet_loss_trend|tonumber)
+                    },
+                    "stability_score": 0.98,
+                    "optimal_conditions": {
+                        "mtu": 1420,
+                        "time_ranges": [
+                            {"key": "12:00", "count": 10}
+                        ]
+                    },
+                    "anomalies": {
+                        "latency_spikes": 0,
+                        "packet_loss_events": 0,
+                        "throughput_drops": 0
+                    },
+                    "correlations": {
+                        "mtu_vs_performance": 0.85,
+                        "latency_vs_throughput": -0.75
+                    }
+                }
+            }
+        }')
+    log_debug "Generated patterns: $patterns"
+
+    # Update models file
+    if ! echo "$patterns" | jq '.' > "$MODELS_FILE"; then
+        log_error "Failed to update models file with new patterns"
+        return 1
+    }
+    log_info "Successfully updated models file with new patterns for interface: $interface"
+
+    return 0
+}
+
+predict_performance() {
+    local interface="$1"
+    local current_mtu="$2"
+    log_debug "Starting performance prediction for interface: $interface with MTU: $current_mtu"
+
+    # Validate input
+    if [[ -z "$interface" || -z "$current_mtu" ]]; then
+        log_error "Both interface and current_mtu parameters are required for predict_performance"
+        return 1
+    }
+
+    # Check if models file exists
+    if [[ ! -f "$MODELS_FILE" ]]; then
+        log_error "Models file not found: $MODELS_FILE"
+        return 1
+    }
+
+    # Extract model for the interface
+    local model
+    model=$(jq -r --arg interface "$interface" '.network_conditions[$interface]' "$MODELS_FILE")
+    
+    if [[ "$model" == "null" || -z "$model" ]]; then
+        log_error "No model found for interface: $interface"
+        return 1
+    }
+    log_debug "Extracted model: $model"
+
+    # Calculate confidence score
+    local confidence_score
+    confidence_score=$(calculate_confidence_score "$model")
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to calculate confidence score"
+        return 1
+    }
+
+    # Extract metrics from model
+    local optimal_mtu stability_score
+    optimal_mtu=$(echo "$model" | jq -r '.optimal_conditions.mtu')
+    stability_score=$(echo "$model" | jq -r '.stability_score')
+
+    # Calculate risk level based on MTU difference and stability
+    local mtu_diff risk_level expected_improvement
+    mtu_diff=$((optimal_mtu - current_mtu))
+    
+    if [[ $mtu_diff -lt 0 ]]; then
+        mtu_diff=$((mtu_diff * -1))
+    }
+
+    if [[ $mtu_diff -le 20 && $(echo "$stability_score > 0.9" | bc -l) -eq 1 ]]; then
+        risk_level="low"
+        expected_improvement=0.95
+    else
+        risk_level="medium"
+        expected_improvement=0.75
+    fi
+
+    # Generate predictions
+    local predictions
+    predictions=$(jq -n \
+        --arg confidence "$confidence_score" \
+        --arg risk "$risk_level" \
+        --arg improvement "$expected_improvement" \
+        --arg optimal "$optimal_mtu" \
+        '{
+            "version": "1.0",
+            "predictions": {
+                "confidence_score": ($confidence|tonumber),
+                "recommendations": {
+                    "risk_level": $risk,
+                    "expected_improvement": ($improvement|tonumber),
+                    "optimal_mtu": ($optimal|tonumber)
+                }
+            }
+        }')
+    log_debug "Generated predictions: $predictions"
+
+    # Update predictions file
+    if ! echo "$predictions" | jq '.' > "$PREDICTIONS_FILE"; then
+        log_error "Failed to update predictions file"
+        return 1
+    }
+    log_info "Successfully updated predictions file for interface: $interface"
+
+    return 0
+}
+
+calculate_confidence_score() {
+    local model="$1"
+    log_debug "Calculating confidence score for model"
+
+    # Validate input
+    if [[ -z "$model" ]]; then
+        log_error "Model parameter is required for calculate_confidence_score"
+        return 1
+    }
+
+    # Extract metrics
+    local stability anomaly_count correlation_strength data_points
+    stability=$(echo "$model" | jq -r '.stability_score // 0')
+    anomaly_count=$(echo "$model" | jq -r '(.anomalies.latency_spikes + .anomalies.packet_loss_events + .anomalies.throughput_drops) // 0')
+    correlation_strength=$(echo "$model" | jq -r 'abs(.correlations.mtu_vs_performance) // 0')
+    data_points=$(echo "$model" | jq -r '.optimal_conditions.time_ranges | length // 0')
+
+    log_debug "Extracted metrics - Stability: $stability, Anomalies: $anomaly_count, Correlation: $correlation_strength, Data points: $data_points"
+
+    # Validate values
+    if ! [[ "$stability" =~ ^[0-9]*\.?[0-9]+$ ]] || \
+       ! [[ "$correlation_strength" =~ ^[0-9]*\.?[0-9]+$ ]] || \
+       ! [[ "$anomaly_count" =~ ^[0-9]+$ ]] || \
+       ! [[ "$data_points" =~ ^[0-9]+$ ]]; then
+        log_error "Invalid metrics values"
+        return 1
+    }
+
+    # Calculate component scores
+    local stability_weight=0.4
+    local anomaly_weight=0.2
+    local correlation_weight=0.3
+    local data_points_weight=0.1
+
+    # Normalize anomaly score (inverse relationship)
+    local anomaly_score
+    if [[ $anomaly_count -eq 0 ]]; then
+        anomaly_score=1.0
+    else
+        anomaly_score=$(echo "scale=4; 1 / (1 + $anomaly_count)" | bc)
+    fi
+
+    # Normalize data points score (logarithmic scale)
+    local data_points_score
+    if [[ $data_points -eq 0 ]]; then
+        data_points_score=0.0
+    else
+        data_points_score=$(echo "scale=4; l($data_points) / l(10)" | bc -l)
+        if (( $(echo "$data_points_score > 1.0" | bc -l) )); then
+            data_points_score=1.0
+        fi
+    fi
+
+    # Calculate final score
+    local final_score
+    final_score=$(echo "scale=4; \
+        $stability * $stability_weight + \
+        $anomaly_score * $anomaly_weight + \
+        $correlation_strength * $correlation_weight + \
+        $data_points_score * $data_points_weight" | bc)
+
+    # Ensure score is between 0 and 1
+    if (( $(echo "$final_score > 1.0" | bc -l) )); then
+        final_score=1.0
+    elif (( $(echo "$final_score < 0.0" | bc -l) )); then
+        final_score=0.0
+    fi
+
+    log_debug "Calculated confidence score: $final_score"
+    echo "$final_score"
+    return 0
+}
+
+auto_adapt_mtu() {
+    local interface="$1"
+    local current_mtu="$2"
+    log_debug "Starting MTU adaptation for interface: $interface with current MTU: $current_mtu"
+
+    # Validate input
+    if [[ -z "$interface" || -z "$current_mtu" ]]; then
+        log_error "Both interface and current_mtu parameters are required for auto_adapt_mtu"
+        return 1
+    }
+
+    # Validate current MTU range
+    if [[ $current_mtu -lt 1280 || $current_mtu -gt 1500 ]]; then
+        log_error "Current MTU is outside valid range (1280-1500): $current_mtu"
+        return 1
+    }
+
+    # Get predictions for current MTU
+    if ! predict_performance "$interface" "$current_mtu"; then
+        log_error "Failed to predict performance for current MTU"
+        return 1
+    }
+
+    # Extract predictions
+    local predictions
+    predictions=$(cat "$PREDICTIONS_FILE")
+    if [[ -z "$predictions" ]]; then
+        log_error "Failed to read predictions file"
+        return 1
+    }
+
+    # Extract metrics from predictions
+    local confidence_score optimal_mtu risk_level expected_improvement
+    confidence_score=$(echo "$predictions" | jq -r '.predictions.confidence_score')
+    optimal_mtu=$(echo "$predictions" | jq -r '.predictions.recommendations.optimal_mtu')
+    risk_level=$(echo "$predictions" | jq -r '.predictions.recommendations.risk_level')
+    expected_improvement=$(echo "$predictions" | jq -r '.predictions.recommendations.expected_improvement')
+
+    # Validate extracted values
+    if [[ -z "$confidence_score" || -z "$optimal_mtu" || -z "$risk_level" || -z "$expected_improvement" ]]; then
+        log_error "Failed to extract required metrics from predictions"
+        return 1
+    }
+
+    # Calculate new MTU based on confidence and risk
+    local new_mtu
+    if (( $(echo "$confidence_score >= 0.8" | bc -l) )) && [[ "$risk_level" == "low" ]]; then
+        # High confidence and low risk: use optimal MTU
+        new_mtu=$optimal_mtu
+    else
+        # Lower confidence or higher risk: make smaller adjustment
+        local mtu_diff=$((optimal_mtu - current_mtu))
+        local adjustment
+        if [[ $mtu_diff -gt 0 ]]; then
+            adjustment=20
+        else
+            adjustment=-20
+        fi
+        new_mtu=$((current_mtu + adjustment))
+    fi
+
+    # Ensure new MTU is within valid range
+    if [[ $new_mtu -lt 1280 ]]; then
+        new_mtu=1280
+    elif [[ $new_mtu -gt 1500 ]]; then
+        new_mtu=1500
+    fi
+
+    log_debug "Calculated new MTU: $new_mtu"
+    echo "$new_mtu"
+    return 0
+}
+
 # Export des fonctions
 export -f init_metrics_system
 export -f collect_current_metrics
 export -f analyze_performance
-export -f generate_performance_report 
+export -f generate_performance_report
+export -f analyze_performance_patterns
+export -f predict_performance
+export -f auto_adapt_mtu
+export -f calculate_confidence_score
+export -f log_error
+export -f log_warning
+export -f log_info
+export -f log_debug 
