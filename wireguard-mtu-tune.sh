@@ -250,6 +250,9 @@ generate_report() {
     local best_packet_loss=$3
     local report_file="$LOGS_DIR/report.txt"
     
+    # Création du fichier de rapport avec les bonnes permissions
+    sudo install -m 644 /dev/null "$report_file"
+    
     {
         echo "=== Rapport d'optimisation MTU ==="
         echo "Date: $(date '+%Y-%m-%d %H:%M:%S')"
@@ -262,7 +265,7 @@ generate_report() {
         echo "=== Résultats détaillés ==="
         echo "MTU,Latence (ms),Perte (%)"
         cat "$LOGS_DIR/results.csv"
-    } > "$report_file"
+    } | sudo tee "$report_file" > /dev/null
     
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [LOG_INFO] Rapport généré : $report_file"
 }
