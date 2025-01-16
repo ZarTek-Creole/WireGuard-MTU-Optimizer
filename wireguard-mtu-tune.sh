@@ -196,12 +196,14 @@ optimize_mtu() {
     local best_mtu=$current_mtu
     local best_latency=999999
     local best_packet_loss=100
+    local results_file="$LOGS_DIR/results.csv"
     
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [LOG_INFO] Démarrage de l'optimisation MTU avancée..."
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [LOG_INFO] MTU actuel : $current_mtu"
     
-    # Création du fichier de résultats
-    echo "mtu,latency,packet_loss" > "$LOGS_DIR/results.csv"
+    # Création du fichier de résultats avec les bonnes permissions
+    sudo install -m 644 /dev/null "$results_file"
+    echo "MTU,Latence (ms),Perte (%)" | sudo tee "$results_file" >/dev/null
     
     # Test de différentes valeurs MTU
     for mtu in $(seq $MIN_MTU 20 $MAX_MTU); do
@@ -216,7 +218,7 @@ optimize_mtu() {
         local latency=$(echo "$ping_result" | grep -oP 'rtt min/avg/max/mdev = \K[\d.]+/[\d.]+/[\d.]+/[\d.]+' | cut -d'/' -f2 || echo "999999")
         
         # Sauvegarde des résultats
-        echo "$mtu,$latency,$packet_loss" >> "$LOGS_DIR/results.csv"
+        echo "$mtu,$latency,$packet_loss" | sudo tee -a "$results_file" >/dev/null
         
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] [LOG_INFO] Résultats : Latence = $latency ms, Perte = $packet_loss%"
         
