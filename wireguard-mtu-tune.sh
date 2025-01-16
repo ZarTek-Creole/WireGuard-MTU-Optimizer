@@ -256,21 +256,27 @@ generate_report() {
     sudo install -m 644 /dev/null "$results_file"
     
     # Génération du rapport
-    sudo -E bash -c "cat > $report_file" << EOF
-=== Rapport d'optimisation MTU ===
-Date: $(date '+%Y-%m-%d %H:%M:%S')
-Interface: $INTERFACE
-Serveur: $SERVER_IP
-MTU optimal: $best_mtu
-Meilleure latence: $best_latency ms
-Perte de paquets: $best_packet_loss%
-
-=== Résultats détaillés ===
-MTU,Latence (ms),Perte (%)
-$(cat "$results_file")
-EOF
+    {
+        echo "=== Rapport d'optimisation MTU ==="
+        echo "Date: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "Interface: $INTERFACE"
+        echo "Serveur: $SERVER_IP"
+        echo "MTU optimal: $best_mtu"
+        echo "Meilleure latence: $best_latency ms"
+        echo "Perte de paquets: $best_packet_loss%"
+        echo ""
+        echo "=== Résultats détaillés ==="
+        echo "MTU,Latence (ms),Perte (%)"
+        sudo cat "$results_file" 2>/dev/null || echo "Aucun résultat détaillé disponible"
+    } | sudo tee "$report_file" >/dev/null
     
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [LOG_INFO] Rapport généré : $report_file"
+    # Vérification de la création du rapport
+    if [ -f "$report_file" ]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [LOG_INFO] Rapport généré : $report_file"
+        sudo cat "$report_file"
+    else
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [LOG_ERROR] Erreur lors de la génération du rapport"
+    fi
 }
 
 # Fonction de configuration des paramètres système
