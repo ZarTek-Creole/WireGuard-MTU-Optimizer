@@ -249,23 +249,26 @@ generate_report() {
     local best_latency=$2
     local best_packet_loss=$3
     local report_file="$LOGS_DIR/report.txt"
+    local results_file="$LOGS_DIR/results.csv"
     
-    # Création du fichier de rapport avec les bonnes permissions
+    # Création des fichiers avec les bonnes permissions
     sudo install -m 644 /dev/null "$report_file"
+    sudo install -m 644 /dev/null "$results_file"
     
-    {
-        echo "=== Rapport d'optimisation MTU ==="
-        echo "Date: $(date '+%Y-%m-%d %H:%M:%S')"
-        echo "Interface: $INTERFACE"
-        echo "Serveur: $SERVER_IP"
-        echo "MTU optimal: $best_mtu"
-        echo "Meilleure latence: $best_latency ms"
-        echo "Perte de paquets: $best_packet_loss%"
-        echo ""
-        echo "=== Résultats détaillés ==="
-        echo "MTU,Latence (ms),Perte (%)"
-        cat "$LOGS_DIR/results.csv"
-    } | sudo tee "$report_file" > /dev/null
+    # Génération du rapport
+    sudo -E bash -c "cat > $report_file" << EOF
+=== Rapport d'optimisation MTU ===
+Date: $(date '+%Y-%m-%d %H:%M:%S')
+Interface: $INTERFACE
+Serveur: $SERVER_IP
+MTU optimal: $best_mtu
+Meilleure latence: $best_latency ms
+Perte de paquets: $best_packet_loss%
+
+=== Résultats détaillés ===
+MTU,Latence (ms),Perte (%)
+$(cat "$results_file")
+EOF
     
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [LOG_INFO] Rapport généré : $report_file"
 }
