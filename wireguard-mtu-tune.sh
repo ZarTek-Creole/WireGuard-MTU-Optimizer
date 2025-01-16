@@ -255,7 +255,6 @@ generate_report() {
     
     # Création des fichiers avec les bonnes permissions
     sudo install -m 644 /dev/null "$report_file"
-    sudo install -m 644 /dev/null "$results_file"
     
     # Génération du rapport
     {
@@ -268,15 +267,16 @@ generate_report() {
         echo "Perte de paquets: $best_packet_loss%"
         echo ""
         echo "=== Résultats détaillés ==="
-        echo "MTU,Latence (ms),Perte (%)"
-        sudo cat "$results_file" 2>/dev/null || echo "Aucun résultat détaillé disponible"
-    } | sudo tee "$report_file" >/dev/null
+        if [ -f "$results_file" ]; then
+            sudo cat "$results_file"
+        else
+            echo "MTU,Latence (ms),Perte (%)"
+            echo "Aucun résultat détaillé disponible"
+        fi
+    } | sudo tee "$report_file"
     
     # Vérification de la création du rapport
-    if [ -f "$report_file" ]; then
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [LOG_INFO] Rapport généré : $report_file"
-        sudo cat "$report_file"
-    else
+    if [ ! -f "$report_file" ]; then
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] [LOG_ERROR] Erreur lors de la génération du rapport"
     fi
 }
